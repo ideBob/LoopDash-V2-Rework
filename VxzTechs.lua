@@ -1,9 +1,9 @@
 --[[
     Vxz Techs
-    Research-based settings for:
+    Systems:
     - Loop Dash (Floater focused)
-    - Supa Tech
-    + Ping Set system
+    - Instant Lethal Tech (researched)
+    - Ping Set
 ]]
 
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -18,45 +18,42 @@ local player           = Players.LocalPlayer
 local CONFIG = {
     LoopDashAnimId = "10503381238",
     BlockAnimId    = "10471478869",
-    SupaUppercutKeywords = {"upper", "Upper", "1050", "1047", "punch", "M1"},
 }
 
 -- ////////// GLOBAL PING //////////
-local UserPing = 80 -- default, user can save their real ping
+local UserPing = 80
 
--- ////////// LOOP DASH (Floater optimized defaults from research) //////////
--- Research notes:
--- Classic Loop Dash prefers LOWER your ping (<100)
--- Opponent higher ping helps floaters
--- Hit torso/chest center = floater instead of knockback
--- First flick timing is the most important
+-- ////////// LOOP DASH (Floater optimized) //////////
 local LoopDash = {
     Enabled          = false,
     Debounce         = false,
     Blocked          = false,
-    WaitDetect       = 1.2,     -- Faster detect for better floaters
+    WaitDetect       = 1.2,
     WaitJump         = 0,
-    WaitRemote       = 0.35,    -- Tight first flick (critical for floater)
-    LockDuration     = 14,      -- Longer lock helps stay under for float
+    WaitRemote       = 0.35,
+    LockDuration     = 14,
     TargetRadius     = 48,
     Cooldown         = 5.5,
-    Responsiveness   = 980,     -- Very high for tight lock under opponent
+    Responsiveness   = 980,
     Connections      = {},
     ActiveLockCleanup = nil,
 }
 
--- ////////// SUPA TECH (Research based) //////////
--- Best ping range from research: ~120-160ms
--- Needs unshiftlock + instant dash after uppercut + slight backstep
-local SupaTech = {
+-- ////////// INSTANT LETHAL TECH (Researched) //////////
+-- Real Instant Lethal:
+-- After Lethal Whirlwind ends → Instant Jump + Front Dash
+-- Variants: Unshiftlock (easier) or Shiftlock + flick
+-- Best with lower ping (<100)
+local InstantLethal = {
     Enabled          = false,
     Debounce         = false,
-    AutoUnshift      = true,
+    AutoJump         = true,
     AutoDash         = true,
-    BackstepStrength = 9,
-    DashDelay        = 0.025,   -- Extremely tight
-    Cooldown         = 0.32,
-    DetectRadius     = 11,
+    AutoUnshift      = true,          -- Unshift version (most consistent)
+    ReshiftDelay     = 0.055,         -- How fast to turn shiftlock back on
+    JumpDashDelay    = 0.01,          -- Tiny delay after detect
+    Cooldown         = 0.45,
+    Keybind          = Enum.KeyCode.E, -- Manual trigger key (or detect ability)
     Connections      = {},
 }
 
@@ -79,9 +76,9 @@ local TabLoop = Win:Tab({
     Opened = true
 })
 
-local TabSupa = Win:Tab({
-    Title = "Supa Tech",
-    Icon = "lucide:zap",
+local TabLethal = Win:Tab({
+    Title = "Instant Lethal",
+    Icon = "lucide:swords",
 })
 
 local TabPing = Win:Tab({
@@ -145,36 +142,27 @@ local function FindNearestTarget(radius)
     return best
 end
 
--- Auto-adjust timings based on saved ping (research driven)
 local function ApplyPingBasedTuning()
     local p = UserPing or 80
 
-    -- Loop Dash prefers lower ping for classic floaters
     if p <= 60 then
         LoopDash.WaitRemote = 0.28
         LoopDash.WaitDetect = 1.0
         LoopDash.Responsiveness = 990
+        InstantLethal.ReshiftDelay = 0.045
+        InstantLethal.JumpDashDelay = 0.008
     elseif p <= 100 then
         LoopDash.WaitRemote = 0.35
         LoopDash.WaitDetect = 1.2
         LoopDash.Responsiveness = 970
+        InstantLethal.ReshiftDelay = 0.055
+        InstantLethal.JumpDashDelay = 0.012
     else
-        -- Higher ping = slightly more delay tolerance
         LoopDash.WaitRemote = 0.42
         LoopDash.WaitDetect = 1.5
         LoopDash.Responsiveness = 940
-    end
-
-    -- Supa Tech sweet spot ~120-160
-    if p >= 110 and p <= 170 then
-        SupaTech.DashDelay = 0.022
-        SupaTech.BackstepStrength = 9
-    elseif p < 110 then
-        SupaTech.DashDelay = 0.035  -- slightly more delay on low ping
-        SupaTech.BackstepStrength = 7
-    else
-        SupaTech.DashDelay = 0.018
-        SupaTech.BackstepStrength = 11
+        InstantLethal.ReshiftDelay = 0.07
+        InstantLethal.JumpDashDelay = 0.02
     end
 end
 
@@ -431,41 +419,23 @@ local function SetupLoopDash(state)
 end
 
 -- ======================================================
---                    SUPA TECH LOGIC
+--               INSTANT LETHAL TECH LOGIC
 -- ======================================================
+-- Research:
+-- After Lethal Whirlwind ends → Instant Jump + Front Dash
+-- Unshiftlock version is most consistent for scripts
+-- Lower ping = better consistency
 
-local function IsLikelyUppercut(track)
-    if not track or not track.Animation then return false end
-    local id = tostring(track.Animation.AnimationId or ""):lower()
-    local name = (track.Name or ""):lower()
-    for _, key in ipairs(CONFIG.SupaUppercutKeywords) do
-        if id:find(key:lower(), 1, true) or name:find(key:lower(), 1, true) then
-            return true
-        end
-    end
-    return false
-end
-
-local function PerformSupaTech()
-    if not SupaTech.Enabled or SupaTech.Debounce then return end
+local function PerformInstantLethal()
+    if not InstantLethal.Enabled or InstantLethal.Debounce then return end
 
     local char, humanoid, hrp = GetCharParts()
     if not humanoid or not hrp then return end
 
-    local target = FindNearestTarget(SupaTech.DetectRadius)
-    if not target then return end
+    InstantLethal.Debounce = true
 
-    SupaTech.Debounce = true
-
-    -- Backstep (research: slight back movement is key)
-    pcall(function()
-        local look = hrp.CFrame.LookVector
-        local back = -look * SupaTech.BackstepStrength
-        hrp.AssemblyLinearVelocity = Vector3.new(back.X, hrp.AssemblyLinearVelocity.Y, back.Z)
-    end)
-
-    -- Force unshiftlock
-    if SupaTech.AutoUnshift then
+    -- 1. Optional Unshift (most popular consistent method)
+    if InstantLethal.AutoUnshift then
         pcall(function()
             if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
                 UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -473,70 +443,59 @@ local function PerformSupaTech()
         end)
     end
 
-    task.delay(SupaTech.DashDelay, function()
-        if not SupaTech.Enabled then
-            SupaTech.Debounce = false
+    -- 2. Tiny delay then Jump + Dash together (core of Instant Lethal)
+    task.delay(InstantLethal.JumpDashDelay, function()
+        if not InstantLethal.Enabled then
+            InstantLethal.Debounce = false
             return
         end
 
-        if SupaTech.AutoDash then
+        if InstantLethal.AutoJump then
+            pcall(function()
+                humanoid.Jump = true
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end)
+        end
+
+        if InstantLethal.AutoDash then
             FireDash()
         end
 
-        task.wait(0.015)
-        pcall(function()
-            if hrp and hrp.Parent then
-                local look = hrp.CFrame.LookVector
-                local curr = hrp.AssemblyLinearVelocity
-                hrp.AssemblyLinearVelocity = Vector3.new(curr.X + look.X * 5, curr.Y, curr.Z + look.Z * 5)
-            end
-        end)
+        -- 3. Quickly re-enable shiftlock (critical timing from tutorials ~0.05-0.06s)
+        if InstantLethal.AutoUnshift then
+            task.delay(InstantLethal.ReshiftDelay, function()
+                pcall(function()
+                    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+                end)
+            end)
+        end
     end)
 
-    task.delay(SupaTech.Cooldown, function()
-        SupaTech.Debounce = false
+    task.delay(InstantLethal.Cooldown, function()
+        InstantLethal.Debounce = false
     end)
 end
 
-local function OnSupaAnimPlayed(track)
-    if not SupaTech.Enabled or SupaTech.Debounce then return end
-    if IsLikelyUppercut(track) then
-        task.spawn(PerformSupaTech)
-    end
-end
-
-local function HookSupaCharacter()
-    if SupaTech.Connections.Anim then
-        pcall(function() SupaTech.Connections.Anim:Disconnect() end)
-        SupaTech.Connections.Anim = nil
-    end
-    local char = player.Character
-    if not char then return end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        SupaTech.Connections.Anim = humanoid.AnimationPlayed:Connect(OnSupaAnimPlayed)
-    end
-end
-
-local function SetupSupaTech(state)
+local function SetupInstantLethal(state)
     if not state then
-        for _, conn in pairs(SupaTech.Connections) do
+        for _, conn in pairs(InstantLethal.Connections) do
             pcall(function() conn:Disconnect() end)
         end
-        SupaTech.Connections = {}
-        SupaTech.Debounce = false
+        InstantLethal.Connections = {}
+        InstantLethal.Debounce = false
         return
     end
 
-    HookSupaCharacter()
-
-    if SupaTech.Connections.CharAdded then
-        pcall(function() SupaTech.Connections.CharAdded:Disconnect() end)
+    -- Manual keybind trigger (press after Lethal ends)
+    if InstantLethal.Connections.Input then
+        pcall(function() InstantLethal.Connections.Input:Disconnect() end)
     end
-    SupaTech.Connections.CharAdded = player.CharacterAdded:Connect(function()
-        task.wait(0.7)
-        if SupaTech.Enabled then
-            HookSupaCharacter()
+
+    InstantLethal.Connections.Input = UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if not InstantLethal.Enabled then return end
+        if input.KeyCode == InstantLethal.Keybind then
+            PerformInstantLethal()
         end
     end)
 end
@@ -547,7 +506,7 @@ end
 
 TabLoop:Paragraph({
     Title = "Loop Dash (Floater Focus)",
-    Desc = "Research based • Hit torso center for floaters • Low ping preferred",
+    Desc = "Hit torso center for floaters • Low ping preferred",
     Image = "lucide:refresh-ccw",
     ImageSize = 18,
     Color = Color3.fromHex("#4ecdc4")
@@ -572,34 +531,78 @@ TabLoop:Slider({ Title = "Target Radius", Flag = "LD_Radius", Value = { Min = 10
 TabLoop:Slider({ Title = "Cooldown", Flag = "LD_CD", Value = { Min = 1, Max = 20, Default = LoopDash.Cooldown }, Callback = function(v) LoopDash.Cooldown = v end })
 
 -- ======================================================
---                    UI - SUPA TECH
+--                    UI - INSTANT LETHAL
 -- ======================================================
 
-TabSupa:Paragraph({
-    Title = "Supa Tech",
-    Desc = "Research based • Best at 120-160 ping • Unshift + Instant Dash",
-    Image = "lucide:zap",
+TabLethal:Paragraph({
+    Title = "Instant Lethal Tech",
+    Desc = "After Lethal Whirlwind ends → Jump + Dash instantly\nPress keybind right when the move ends",
+    Image = "lucide:swords",
     ImageSize = 18,
-    Color = Color3.fromHex("#ff9f43")
+    Color = Color3.fromHex("#ff6b6b")
 })
 
-TabSupa:Toggle({
-    Title = "Enable Supa Tech",
-    Flag = "ST_Enable",
-    Value = SupaTech.Enabled,
+TabLethal:Toggle({
+    Title = "Enable Instant Lethal",
+    Flag = "IL_Enable",
+    Value = InstantLethal.Enabled,
     Callback = function(v)
-        SupaTech.Enabled = v
-        SetupSupaTech(v)
-        WindUI:Notify({ Title = "Supa Tech", Content = v and "ENABLED" or "DISABLED", Icon = v and "lucide:check" or "lucide:x", Duration = 2 })
+        InstantLethal.Enabled = v
+        SetupInstantLethal(v)
+        WindUI:Notify({ Title = "Instant Lethal", Content = v and "ENABLED" or "DISABLED", Icon = v and "lucide:check" or "lucide:x", Duration = 2 })
     end
 })
 
-TabSupa:Toggle({ Title = "Auto Unshiftlock", Flag = "ST_Unshift", Desc = "Core of real Supa Tech", Value = SupaTech.AutoUnshift, Callback = function(v) SupaTech.AutoUnshift = v end })
-TabSupa:Toggle({ Title = "Auto Dash", Flag = "ST_Dash", Value = SupaTech.AutoDash, Callback = function(v) SupaTech.AutoDash = v end })
-TabSupa:Slider({ Title = "Backstep Strength", Flag = "ST_Back", Value = { Min = 0, Max = 20, Default = SupaTech.BackstepStrength }, Callback = function(v) SupaTech.BackstepStrength = v end })
-TabSupa:Slider({ Title = "Dash Delay (ms)", Flag = "ST_Delay", Value = { Min = 0, Max = 15, Default = math.floor(SupaTech.DashDelay * 100) }, Callback = function(v) SupaTech.DashDelay = v / 100 end })
-TabSupa:Slider({ Title = "Detect Radius", Flag = "ST_Radius", Value = { Min = 5, Max = 25, Default = SupaTech.DetectRadius }, Callback = function(v) SupaTech.DetectRadius = v end })
-TabSupa:Slider({ Title = "Cooldown", Flag = "ST_CD", Value = { Min = 10, Max = 80, Default = math.floor(SupaTech.Cooldown * 100) }, Callback = function(v) SupaTech.Cooldown = v / 100 end })
+TabLethal:Toggle({
+    Title = "Auto Jump",
+    Flag = "IL_Jump",
+    Value = InstantLethal.AutoJump,
+    Callback = function(v) InstantLethal.AutoJump = v end
+})
+
+TabLethal:Toggle({
+    Title = "Auto Dash",
+    Flag = "IL_Dash",
+    Value = InstantLethal.AutoDash,
+    Callback = function(v) InstantLethal.AutoDash = v end
+})
+
+TabLethal:Toggle({
+    Title = "Unshiftlock Assist",
+    Flag = "IL_Unshift",
+    Desc = "Most consistent method from research",
+    Value = InstantLethal.AutoUnshift,
+    Callback = function(v) InstantLethal.AutoUnshift = v end
+})
+
+TabLethal:Slider({
+    Title = "Reshift Delay (ms)",
+    Flag = "IL_Reshift",
+    Value = { Min = 2, Max = 15, Default = math.floor(InstantLethal.ReshiftDelay * 100) },
+    Callback = function(v) InstantLethal.ReshiftDelay = v / 100 end
+})
+
+TabLethal:Slider({
+    Title = "Jump+Dash Delay (ms)",
+    Flag = "IL_Delay",
+    Value = { Min = 0, Max = 10, Default = math.floor(InstantLethal.JumpDashDelay * 100) },
+    Callback = function(v) InstantLethal.JumpDashDelay = v / 100 end
+})
+
+TabLethal:Slider({
+    Title = "Cooldown",
+    Flag = "IL_CD",
+    Value = { Min = 10, Max = 100, Default = math.floor(InstantLethal.Cooldown * 100) },
+    Callback = function(v) InstantLethal.Cooldown = v / 100 end
+})
+
+TabLethal:Paragraph({
+    Title = "How to use",
+    Desc = "1. Use Lethal Whirlwind\n2. The moment it ends press [E]\n3. Script does Jump + Dash + Unshift/Reshift",
+    Image = "lucide:info",
+    ImageSize = 16,
+    Color = Color3.fromHex("#74b9ff")
+})
 
 -- ======================================================
 --                    UI - PING SET
@@ -607,7 +610,7 @@ TabSupa:Slider({ Title = "Cooldown", Flag = "ST_CD", Value = { Min = 10, Max = 8
 
 TabPing:Paragraph({
     Title = "Ping Set",
-    Desc = "Enter your current ping. Script auto-tunes Loop Dash & Supa Tech timings.",
+    Desc = "Enter your ping. Script auto-tunes both techs.",
     Image = "lucide:wifi",
     ImageSize = 18,
     Color = Color3.fromHex("#a29bfe")
@@ -615,12 +618,10 @@ TabPing:Paragraph({
 
 local pingBox = TabPing:Input({
     Title = "Your Ping (ms)",
-    Placeholder = "Example: 85",
+    Placeholder = "Example: 75",
     Flag = "PingInput",
     Value = tostring(UserPing),
-    Callback = function(text)
-        -- live update optional
-    end
+    Callback = function() end
 })
 
 TabPing:Button({
@@ -632,7 +633,7 @@ TabPing:Button({
         if not num or num < 1 or num > 500 then
             WindUI:Notify({
                 Title = "Ping Set",
-                Content = "Invalid ping. Enter a number between 1-500",
+                Content = "Invalid ping. Enter 1-500",
                 Icon = "lucide:x",
                 Duration = 3
             })
@@ -644,7 +645,7 @@ TabPing:Button({
 
         WindUI:Notify({
             Title = "Ping Set",
-            Content = "Saved " .. UserPing .. "ms • Timings auto-adjusted",
+            Content = "Saved " .. UserPing .. "ms • Timings adjusted",
             Icon = "lucide:check",
             Duration = 3
         })
@@ -653,7 +654,7 @@ TabPing:Button({
 
 TabPing:Paragraph({
     Title = "Research Notes",
-    Desc = "Loop Dash floaters prefer your ping under 100.\nSupa Tech sweet spot is 120-160ms.\nHigher opponent ping helps both techs.",
+    Desc = "Loop Dash floaters → your ping under 100\nInstant Lethal → lower ping is better (<100 ideal)\nOpponent higher ping helps both",
     Image = "lucide:info",
     ImageSize = 16,
     Color = Color3.fromHex("#74b9ff")
@@ -664,7 +665,7 @@ ApplyPingBasedTuning()
 
 WindUI:Notify({
     Title = "Vxz Techs",
-    Content = "Loaded with researched Floater + Supa settings",
+    Content = "Loaded • Loop Dash + Instant Lethal + Ping Set",
     Icon = "lucide:check-circle",
     Duration = 3
 })
