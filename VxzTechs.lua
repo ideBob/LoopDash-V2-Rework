@@ -1,8 +1,9 @@
 --[[
     Vxz Techs
-    Fully separated advanced systems:
-    - Loop Dash (independent)
-    - Supa Tech (independent)
+    Research-based settings for:
+    - Loop Dash (Floater focused)
+    - Supa Tech
+    + Ping Set system
 ]]
 
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -17,36 +18,45 @@ local player           = Players.LocalPlayer
 local CONFIG = {
     LoopDashAnimId = "10503381238",
     BlockAnimId    = "10471478869",
-    -- Common uppercut / M1 related animation patterns (TSB)
     SupaUppercutKeywords = {"upper", "Upper", "1050", "1047", "punch", "M1"},
 }
 
--- ////////// LOOP DASH STATE //////////
+-- ////////// GLOBAL PING //////////
+local UserPing = 80 -- default, user can save their real ping
+
+-- ////////// LOOP DASH (Floater optimized defaults from research) //////////
+-- Research notes:
+-- Classic Loop Dash prefers LOWER your ping (<100)
+-- Opponent higher ping helps floaters
+-- Hit torso/chest center = floater instead of knockback
+-- First flick timing is the most important
 local LoopDash = {
     Enabled          = false,
     Debounce         = false,
     Blocked          = false,
-    WaitDetect       = 1.5,
+    WaitDetect       = 1.2,     -- Faster detect for better floaters
     WaitJump         = 0,
-    WaitRemote       = 0.4,
-    LockDuration     = 12,
-    TargetRadius     = 55,
-    Cooldown         = 6,
-    Responsiveness   = 950,
+    WaitRemote       = 0.35,    -- Tight first flick (critical for floater)
+    LockDuration     = 14,      -- Longer lock helps stay under for float
+    TargetRadius     = 48,
+    Cooldown         = 5.5,
+    Responsiveness   = 980,     -- Very high for tight lock under opponent
     Connections      = {},
     ActiveLockCleanup = nil,
 }
 
--- ////////// SUPA TECH STATE (fully independent) //////////
+-- ////////// SUPA TECH (Research based) //////////
+-- Best ping range from research: ~120-160ms
+-- Needs unshiftlock + instant dash after uppercut + slight backstep
 local SupaTech = {
     Enabled          = false,
     Debounce         = false,
-    AutoUnshift      = true,          -- Automatically disables shiftlock at the right moment
-    AutoDash         = true,          -- Automatically fires the dash
-    BackstepStrength = 8,             -- Slight backward velocity before dash
-    DashDelay        = 0.03,          -- Tiny delay after unshift before dash (critical)
-    Cooldown         = 0.35,
-    DetectRadius     = 12,            -- Only trigger when near a target
+    AutoUnshift      = true,
+    AutoDash         = true,
+    BackstepStrength = 9,
+    DashDelay        = 0.025,   -- Extremely tight
+    Cooldown         = 0.32,
+    DetectRadius     = 11,
     Connections      = {},
 }
 
@@ -56,11 +66,11 @@ local Win = WindUI:CreateWindow({
     Icon = "rbxassetid://88536674439005",
     Author = "Vxz",
     Folder = "VxzTechs",
-    Size = UDim2.fromOffset(620, 540),
+    Size = UDim2.fromOffset(640, 560),
     Theme = "Dark",
     HideSearchBar = false,
     NewElements = true,
-    SideBarWidth = 180,
+    SideBarWidth = 185,
 })
 
 local TabLoop = Win:Tab({
@@ -74,8 +84,13 @@ local TabSupa = Win:Tab({
     Icon = "lucide:zap",
 })
 
+local TabPing = Win:Tab({
+    Title = "Ping Set",
+    Icon = "lucide:wifi",
+})
+
 -- ======================================================
---                    SHARED HELPERS
+--                    HELPERS
 -- ======================================================
 
 local function GetCharParts()
@@ -128,6 +143,39 @@ local function FindNearestTarget(radius)
         end
     end
     return best
+end
+
+-- Auto-adjust timings based on saved ping (research driven)
+local function ApplyPingBasedTuning()
+    local p = UserPing or 80
+
+    -- Loop Dash prefers lower ping for classic floaters
+    if p <= 60 then
+        LoopDash.WaitRemote = 0.28
+        LoopDash.WaitDetect = 1.0
+        LoopDash.Responsiveness = 990
+    elseif p <= 100 then
+        LoopDash.WaitRemote = 0.35
+        LoopDash.WaitDetect = 1.2
+        LoopDash.Responsiveness = 970
+    else
+        -- Higher ping = slightly more delay tolerance
+        LoopDash.WaitRemote = 0.42
+        LoopDash.WaitDetect = 1.5
+        LoopDash.Responsiveness = 940
+    end
+
+    -- Supa Tech sweet spot ~120-160
+    if p >= 110 and p <= 170 then
+        SupaTech.DashDelay = 0.022
+        SupaTech.BackstepStrength = 9
+    elseif p < 110 then
+        SupaTech.DashDelay = 0.035  -- slightly more delay on low ping
+        SupaTech.BackstepStrength = 7
+    else
+        SupaTech.DashDelay = 0.018
+        SupaTech.BackstepStrength = 11
+    end
 end
 
 -- ======================================================
@@ -385,15 +433,11 @@ end
 -- ======================================================
 --                    SUPA TECH LOGIC
 -- ======================================================
--- Real Supa Tech flow (from tutorials):
--- 3 M1s → Uppercut + slight backstep → Instant Unshiftlock → Instant Dash
--- Goal: stick / glide into opponent hitbox
 
 local function IsLikelyUppercut(track)
     if not track or not track.Animation then return false end
     local id = tostring(track.Animation.AnimationId or ""):lower()
     local name = (track.Name or ""):lower()
-
     for _, key in ipairs(CONFIG.SupaUppercutKeywords) do
         if id:find(key:lower(), 1, true) or name:find(key:lower(), 1, true) then
             return true
@@ -408,35 +452,27 @@ local function PerformSupaTech()
     local char, humanoid, hrp = GetCharParts()
     if not humanoid or not hrp then return end
 
-    -- Only activate when near a valid target
     local target = FindNearestTarget(SupaTech.DetectRadius)
     if not target then return end
 
     SupaTech.Debounce = true
 
-    -- 1. Slight backstep (critical for the tech)
+    -- Backstep (research: slight back movement is key)
     pcall(function()
         local look = hrp.CFrame.LookVector
         local back = -look * SupaTech.BackstepStrength
         hrp.AssemblyLinearVelocity = Vector3.new(back.X, hrp.AssemblyLinearVelocity.Y, back.Z)
     end)
 
-    -- 2. Force unshiftlock (most important part of real Supa Tech)
+    -- Force unshiftlock
     if SupaTech.AutoUnshift then
         pcall(function()
-            -- Multiple methods to ensure shiftlock is off
-            if player.CameraMode then
-                -- Camera related
-            end
-            local mouse = player:GetMouse()
-            -- Common shiftlock toggle methods used in TSB scripts
             if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
                 UserInputService.MouseBehavior = Enum.MouseBehavior.Default
             end
         end)
     end
 
-    -- 3. Tiny delay then dash (timing is everything)
     task.delay(SupaTech.DashDelay, function()
         if not SupaTech.Enabled then
             SupaTech.Debounce = false
@@ -447,13 +483,12 @@ local function PerformSupaTech()
             FireDash()
         end
 
-        -- Optional slight forward boost after dash to help stick
-        task.wait(0.02)
+        task.wait(0.015)
         pcall(function()
             if hrp and hrp.Parent then
                 local look = hrp.CFrame.LookVector
                 local curr = hrp.AssemblyLinearVelocity
-                hrp.AssemblyLinearVelocity = Vector3.new(curr.X + look.X * 6, curr.Y, curr.Z + look.Z * 6)
+                hrp.AssemblyLinearVelocity = Vector3.new(curr.X + look.X * 5, curr.Y, curr.Z + look.Z * 5)
             end
         end)
     end)
@@ -511,8 +546,8 @@ end
 -- ======================================================
 
 TabLoop:Paragraph({
-    Title = "Loop Dash",
-    Desc = "Independent • Animation detect → Jump + Dash + Horizontal Lock",
+    Title = "Loop Dash (Floater Focus)",
+    Desc = "Research based • Hit torso center for floaters • Low ping preferred",
     Image = "lucide:refresh-ccw",
     ImageSize = 18,
     Color = Color3.fromHex("#4ecdc4")
@@ -525,56 +560,16 @@ TabLoop:Toggle({
     Callback = function(v)
         LoopDash.Enabled = v
         SetupLoopDash(v)
-        WindUI:Notify({
-            Title = "Loop Dash",
-            Content = v and "ENABLED" or "DISABLED",
-            Icon = v and "lucide:check" or "lucide:x",
-            Duration = 2
-        })
+        WindUI:Notify({ Title = "Loop Dash", Content = v and "ENABLED" or "DISABLED", Icon = v and "lucide:check" or "lucide:x", Duration = 2 })
     end
 })
 
-TabLoop:Slider({
-    Title = "Detect Delay",
-    Flag = "LD_Detect",
-    Value = { Min = 0, Max = 10, Default = LoopDash.WaitDetect },
-    Callback = function(v) LoopDash.WaitDetect = v end
-})
-
-TabLoop:Slider({
-    Title = "First Flick Delay",
-    Flag = "LD_Flick",
-    Value = { Min = 0, Max = 10, Default = LoopDash.WaitRemote },
-    Callback = function(v) LoopDash.WaitRemote = v end
-})
-
-TabLoop:Slider({
-    Title = "Smoothness / Lock",
-    Flag = "LD_Smooth",
-    Value = { Min = 1, Max = 1000, Default = LoopDash.Responsiveness },
-    Callback = function(v) LoopDash.Responsiveness = v end
-})
-
-TabLoop:Slider({
-    Title = "Lock Duration",
-    Flag = "LD_Lock",
-    Value = { Min = 1, Max = 30, Default = LoopDash.LockDuration },
-    Callback = function(v) LoopDash.LockDuration = v end
-})
-
-TabLoop:Slider({
-    Title = "Target Radius",
-    Flag = "LD_Radius",
-    Value = { Min = 10, Max = 100, Default = LoopDash.TargetRadius },
-    Callback = function(v) LoopDash.TargetRadius = v end
-})
-
-TabLoop:Slider({
-    Title = "Cooldown",
-    Flag = "LD_CD",
-    Value = { Min = 1, Max = 20, Default = LoopDash.Cooldown },
-    Callback = function(v) LoopDash.Cooldown = v end
-})
+TabLoop:Slider({ Title = "Detect Delay", Flag = "LD_Detect", Value = { Min = 0, Max = 10, Default = LoopDash.WaitDetect }, Callback = function(v) LoopDash.WaitDetect = v end })
+TabLoop:Slider({ Title = "First Flick Delay", Flag = "LD_Flick", Value = { Min = 0, Max = 10, Default = LoopDash.WaitRemote }, Callback = function(v) LoopDash.WaitRemote = v end })
+TabLoop:Slider({ Title = "Smoothness / Lock (Floater)", Flag = "LD_Smooth", Value = { Min = 1, Max = 1000, Default = LoopDash.Responsiveness }, Callback = function(v) LoopDash.Responsiveness = v end })
+TabLoop:Slider({ Title = "Lock Duration", Flag = "LD_Lock", Value = { Min = 1, Max = 30, Default = LoopDash.LockDuration }, Callback = function(v) LoopDash.LockDuration = v end })
+TabLoop:Slider({ Title = "Target Radius", Flag = "LD_Radius", Value = { Min = 10, Max = 100, Default = LoopDash.TargetRadius }, Callback = function(v) LoopDash.TargetRadius = v end })
+TabLoop:Slider({ Title = "Cooldown", Flag = "LD_CD", Value = { Min = 1, Max = 20, Default = LoopDash.Cooldown }, Callback = function(v) LoopDash.Cooldown = v end })
 
 -- ======================================================
 --                    UI - SUPA TECH
@@ -582,7 +577,7 @@ TabLoop:Slider({
 
 TabSupa:Paragraph({
     Title = "Supa Tech",
-    Desc = "Independent • Uppercut detect → Backstep + Unshiftlock + Instant Dash",
+    Desc = "Research based • Best at 120-160 ping • Unshift + Instant Dash",
     Image = "lucide:zap",
     ImageSize = 18,
     Color = Color3.fromHex("#ff9f43")
@@ -595,63 +590,81 @@ TabSupa:Toggle({
     Callback = function(v)
         SupaTech.Enabled = v
         SetupSupaTech(v)
+        WindUI:Notify({ Title = "Supa Tech", Content = v and "ENABLED" or "DISABLED", Icon = v and "lucide:check" or "lucide:x", Duration = 2 })
+    end
+})
+
+TabSupa:Toggle({ Title = "Auto Unshiftlock", Flag = "ST_Unshift", Desc = "Core of real Supa Tech", Value = SupaTech.AutoUnshift, Callback = function(v) SupaTech.AutoUnshift = v end })
+TabSupa:Toggle({ Title = "Auto Dash", Flag = "ST_Dash", Value = SupaTech.AutoDash, Callback = function(v) SupaTech.AutoDash = v end })
+TabSupa:Slider({ Title = "Backstep Strength", Flag = "ST_Back", Value = { Min = 0, Max = 20, Default = SupaTech.BackstepStrength }, Callback = function(v) SupaTech.BackstepStrength = v end })
+TabSupa:Slider({ Title = "Dash Delay (ms)", Flag = "ST_Delay", Value = { Min = 0, Max = 15, Default = math.floor(SupaTech.DashDelay * 100) }, Callback = function(v) SupaTech.DashDelay = v / 100 end })
+TabSupa:Slider({ Title = "Detect Radius", Flag = "ST_Radius", Value = { Min = 5, Max = 25, Default = SupaTech.DetectRadius }, Callback = function(v) SupaTech.DetectRadius = v end })
+TabSupa:Slider({ Title = "Cooldown", Flag = "ST_CD", Value = { Min = 10, Max = 80, Default = math.floor(SupaTech.Cooldown * 100) }, Callback = function(v) SupaTech.Cooldown = v / 100 end })
+
+-- ======================================================
+--                    UI - PING SET
+-- ======================================================
+
+TabPing:Paragraph({
+    Title = "Ping Set",
+    Desc = "Enter your current ping. Script auto-tunes Loop Dash & Supa Tech timings.",
+    Image = "lucide:wifi",
+    ImageSize = 18,
+    Color = Color3.fromHex("#a29bfe")
+})
+
+local pingBox = TabPing:Input({
+    Title = "Your Ping (ms)",
+    Placeholder = "Example: 85",
+    Flag = "PingInput",
+    Value = tostring(UserPing),
+    Callback = function(text)
+        -- live update optional
+    end
+})
+
+TabPing:Button({
+    Title = "Save To Script",
+    Callback = function()
+        local raw = pingBox and pingBox.Value or tostring(UserPing)
+        local num = tonumber(raw)
+
+        if not num or num < 1 or num > 500 then
+            WindUI:Notify({
+                Title = "Ping Set",
+                Content = "Invalid ping. Enter a number between 1-500",
+                Icon = "lucide:x",
+                Duration = 3
+            })
+            return
+        end
+
+        UserPing = math.floor(num)
+        ApplyPingBasedTuning()
+
         WindUI:Notify({
-            Title = "Supa Tech",
-            Content = v and "ENABLED" or "DISABLED",
-            Icon = v and "lucide:check" or "lucide:x",
-            Duration = 2
+            Title = "Ping Set",
+            Content = "Saved " .. UserPing .. "ms • Timings auto-adjusted",
+            Icon = "lucide:check",
+            Duration = 3
         })
     end
 })
 
-TabSupa:Toggle({
-    Title = "Auto Unshiftlock",
-    Flag = "ST_Unshift",
-    Desc = "Automatically turns off shiftlock (core of real Supa Tech)",
-    Value = SupaTech.AutoUnshift,
-    Callback = function(v) SupaTech.AutoUnshift = v end
+TabPing:Paragraph({
+    Title = "Research Notes",
+    Desc = "Loop Dash floaters prefer your ping under 100.\nSupa Tech sweet spot is 120-160ms.\nHigher opponent ping helps both techs.",
+    Image = "lucide:info",
+    ImageSize = 16,
+    Color = Color3.fromHex("#74b9ff")
 })
 
-TabSupa:Toggle({
-    Title = "Auto Dash",
-    Flag = "ST_Dash",
-    Desc = "Automatically fires the dash after unshift",
-    Value = SupaTech.AutoDash,
-    Callback = function(v) SupaTech.AutoDash = v end
-})
+-- Init
+ApplyPingBasedTuning()
 
-TabSupa:Slider({
-    Title = "Backstep Strength",
-    Flag = "ST_Back",
-    Value = { Min = 0, Max = 20, Default = SupaTech.BackstepStrength },
-    Callback = function(v) SupaTech.BackstepStrength = v end
-})
-
-TabSupa:Slider({
-    Title = "Dash Delay (ms)",
-    Flag = "ST_Delay",
-    Value = { Min = 0, Max = 15, Default = math.floor(SupaTech.DashDelay * 100) },
-    Callback = function(v) SupaTech.DashDelay = v / 100 end
-})
-
-TabSupa:Slider({
-    Title = "Detect Radius",
-    Flag = "ST_Radius",
-    Value = { Min = 5, Max = 25, Default = SupaTech.DetectRadius },
-    Callback = function(v) SupaTech.DetectRadius = v end
-})
-
-TabSupa:Slider({
-    Title = "Cooldown",
-    Flag = "ST_CD",
-    Value = { Min = 10, Max = 80, Default = math.floor(SupaTech.Cooldown * 100) },
-    Callback = function(v) SupaTech.Cooldown = v / 100 end
-})
-
--- Final
 WindUI:Notify({
     Title = "Vxz Techs",
-    Content = "Loaded • Loop Dash & Supa Tech are fully independent",
+    Content = "Loaded with researched Floater + Supa settings",
     Icon = "lucide:check-circle",
     Duration = 3
 })
