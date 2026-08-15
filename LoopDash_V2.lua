@@ -1,6 +1,6 @@
 --[[
-    LoopDash v2 / Rework - Full Advanced Luau Script
-    Archived & hosted version
+    LoopDash v2 / Rework + Oreo Tech
+    Best optimized config
 ]]
 
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -17,25 +17,26 @@ local CONFIG = {
     loopReworkBlockAnimId = "10471478869",
 }
 
+-- BEST CONFIG (optimized for LoopDash + Oreo Tech)
 local STATE = {
-    loopRework = false,
+    loopRework = true,                    -- Enabled by default
     loopReworkUnloaded = false,
     loopReworkDebounce = false,
     loopReworkBlocked = false,
-    loopReworkWaitDetect = 3,
-    loopReworkWaitJump = 0,
-    loopReworkWaitRemote = 1,
-    loopReworkLockDuration = 15,
-    loopReworkTargetRadius = 50,
-    loopReworkCooldown = 10,
-    loopReworkResponsiveness = 600,
-    ForceJumpEnabled = false,
-    ForceJumpUpwardVelocity = 52,
-    ForceJumpDebounceTime = 18,
+    loopReworkWaitDetect = 1.5,           -- Fast detect
+    loopReworkWaitJump = 0,               -- Instant jump
+    loopReworkWaitRemote = 0.4,           -- Very fast first flick
+    loopReworkLockDuration = 12,          -- Solid lock time
+    loopReworkTargetRadius = 55,          -- Slightly larger radius
+    loopReworkCooldown = 6,              -- Lower cooldown for more frequent loops
+    loopReworkResponsiveness = 950,       -- Near-max smoothness / lock strength
+    ForceJumpEnabled = true,              -- Oreo Tech ON by default
+    ForceJumpUpwardVelocity = 68,         -- Strong jump for Oreo Tech
+    ForceJumpDebounceTime = 12,           -- Faster jump reuse
 }
 
 local Win = WindUI:CreateWindow({
-    Title = "Dovi's Hub v1.2",
+    Title = "Dovi's Hub v1.3 | Oreo Tech",
     Icon = "rbxassetid://88536674439005",
     Author = "Auto Tech",
     Folder = "DoviHub",
@@ -49,15 +50,15 @@ local Win = WindUI:CreateWindow({
 
 local Tabs = {
     LoopDashv2 = Win:Tab({
-        Title = "Loop Dash v2",
+        Title = "Loop Dash v2 + Oreo",
         Icon = "lucide:refresh-ccw-dot",
         Opened = true
     }),
 }
 
 Tabs.LoopDashv2:Paragraph({
-    Title = "Loop Dash v2 / Rework",
-    Desc = "Just better loop dash, can also be used for oreo tech !",
+    Title = "Loop Dash v2 + Oreo Tech",
+    Desc = "Best config loaded | Oreo Tech (Jump Assist) enabled by default",
     Image = "lucide:refresh-ccw-dot",
     ImageSize = 20,
     Color = Color3.fromHex("#4ecdc4")
@@ -80,9 +81,9 @@ Tabs.LoopDashv2:Toggle({
 })
 
 Tabs.LoopDashv2:Toggle({
-    Title = "Jump Assist",
+    Title = "Oreo Tech (Jump Assist)",
     Flag = "Save24",
-    Desc = "Use this for oreo tech !",
+    Desc = "Required for Oreo Tech - Keep ON",
     Value = STATE.ForceJumpEnabled,
     Callback = function(state)
         STATE.ForceJumpEnabled = state
@@ -92,20 +93,26 @@ Tabs.LoopDashv2:Toggle({
         else
             loopReworkForceJumpUnload()
         end
+        WindUI:Notify({
+            Title = "Oreo Tech",
+            Content = state and "ENABLED" or "DISABLED",
+            Icon = state and "lucide:check" or "lucide:x",
+            Duration = 2
+        })
     end
 })
 
 Tabs.LoopDashv2:Slider({
-    Title = "Jump hight",
+    Title = "Jump Height (Oreo)",
     Flag = "Save25",
-    Value = { Min = 10, Max = 100, Default = STATE.ForceJumpUpwardVelocity or 52 },
+    Value = { Min = 10, Max = 100, Default = STATE.ForceJumpUpwardVelocity },
     Callback = function(value)
         STATE.ForceJumpUpwardVelocity = value
     end
 })
 
 Tabs.LoopDashv2:Slider({
-    Title = "Delay ",
+    Title = "Detect Delay",
     Flag = "Save26",
     Value = {Min = 0, Max = 10, Default = STATE.loopReworkWaitDetect},
     Callback = function(value)
@@ -123,7 +130,7 @@ Tabs.LoopDashv2:Slider({
 })
 
 Tabs.LoopDashv2:Slider({
-    Title = "Smoothness",
+    Title = "Smoothness / Lock Strength",
     Flag = "Save28",
     Value = {Min = 1, Max = 1000, Default = STATE.loopReworkResponsiveness},
     Callback = function(value)
@@ -358,17 +365,17 @@ function loopReworkForceJumpDoJump(humanoid, hrp)
     if hrp and hrp.Parent then
         pcall(function()
             local curr = hrp.AssemblyLinearVelocity
-            local upwardVel = STATE.ForceJumpUpwardVelocity or 52
+            local upwardVel = STATE.ForceJumpUpwardVelocity or 68
             hrp.AssemblyLinearVelocity = Vector3.new(curr.X, upwardVel, curr.Z)
         end)
         pcall(function()
             local v = hrp.Velocity
-            local upwardVel = STATE.ForceJumpUpwardVelocity or 52
+            local upwardVel = STATE.ForceJumpUpwardVelocity or 68
             hrp.Velocity = Vector3.new(v.X, upwardVel, v.Z)
         end)
     end
 
-    local debounceTime = (STATE.ForceJumpDebounceTime or 18) / 100
+    local debounceTime = (STATE.ForceJumpDebounceTime or 12) / 100
     delay(debounceTime, function()
         loopReworkForceJumpCanUse = true
     end)
@@ -602,3 +609,15 @@ function loopReworkSetupLoopRework()
 
     loopReworkForceJumpSetup()
 end
+
+-- Auto-start with best config + Oreo Tech
+task.spawn(function()
+    task.wait(0.5)
+    loopReworkSetupLoopRework()
+    WindUI:Notify({
+        Title = "LoopDash + Oreo Tech",
+        Content = "Best config loaded & running",
+        Icon = "lucide:check",
+        Duration = 3
+    })
+end)
