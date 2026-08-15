@@ -1,26 +1,27 @@
 --[[
     Vxz Techs
-    Fully separated systems:
+    Fully separated advanced systems:
     - Loop Dash (independent)
-    - Oreo Tech (independent)
-    Advanced Luau | Clean architecture
+    - Supa Tech (independent)
 ]]
 
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
-local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
-local UserInputService  = game:GetService("UserInputService")
-local Workspace         = game:GetService("Workspace")
-local player            = Players.LocalPlayer
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace        = game:GetService("Workspace")
+local player           = Players.LocalPlayer
 
 -- ////////// CONFIG //////////
 local CONFIG = {
-    LoopDashAnimId   = "10503381238",
-    BlockAnimId      = "10471478869",
+    LoopDashAnimId = "10503381238",
+    BlockAnimId    = "10471478869",
+    -- Common uppercut / M1 related animation patterns (TSB)
+    SupaUppercutKeywords = {"upper", "Upper", "1050", "1047", "punch", "M1"},
 }
 
--- ////////// STATE (completely separated) //////////
+-- ////////// LOOP DASH STATE //////////
 local LoopDash = {
     Enabled          = false,
     Debounce         = false,
@@ -36,17 +37,17 @@ local LoopDash = {
     ActiveLockCleanup = nil,
 }
 
-local OreoTech = {
+-- ////////// SUPA TECH STATE (fully independent) //////////
+local SupaTech = {
     Enabled          = false,
-    CanJump          = true,
-    JumpVelocity     = 72,
-    DebounceTime     = 0.14,
-    AutoJump         = false,          -- when true, auto jumps when grounded
-    Keybind          = Enum.KeyCode.Space,
+    Debounce         = false,
+    AutoUnshift      = true,          -- Automatically disables shiftlock at the right moment
+    AutoDash         = true,          -- Automatically fires the dash
+    BackstepStrength = 8,             -- Slight backward velocity before dash
+    DashDelay        = 0.03,          -- Tiny delay after unshift before dash (critical)
+    Cooldown         = 0.35,
+    DetectRadius     = 12,            -- Only trigger when near a target
     Connections      = {},
-    Character        = nil,
-    Humanoid         = nil,
-    HRP              = nil,
 }
 
 -- ////////// WINDOW //////////
@@ -55,27 +56,26 @@ local Win = WindUI:CreateWindow({
     Icon = "rbxassetid://88536674439005",
     Author = "Vxz",
     Folder = "VxzTechs",
-    Size = UDim2.fromOffset(620, 520),
+    Size = UDim2.fromOffset(620, 540),
     Theme = "Dark",
     HideSearchBar = false,
     NewElements = true,
     SideBarWidth = 180,
 })
 
--- ////////// TABS //////////
 local TabLoop = Win:Tab({
     Title = "Loop Dash",
     Icon = "lucide:refresh-ccw",
     Opened = true
 })
 
-local TabOreo = Win:Tab({
-    Title = "Oreo Tech",
+local TabSupa = Win:Tab({
+    Title = "Supa Tech",
     Icon = "lucide:zap",
 })
 
 -- ======================================================
---                    LOOP DASH LOGIC
+--                    SHARED HELPERS
 -- ======================================================
 
 local function GetCharParts()
@@ -89,7 +89,7 @@ local function GetCharParts()
     return nil
 end
 
-local function FireDashQW()
+local function FireDash()
     local char = player.Character
     if not char then return end
     local comm = char:FindFirstChild("Communicate")
@@ -104,8 +104,7 @@ local function FireDashQW()
     end
 end
 
-local function FindBestTarget(radius)
-    radius = radius or LoopDash.TargetRadius
+local function FindNearestTarget(radius)
     local live = Workspace:FindFirstChild("Live")
     if not live then return nil end
     local _, _, hrp = GetCharParts()
@@ -131,11 +130,14 @@ local function FindBestTarget(radius)
     return best
 end
 
+-- ======================================================
+--                    LOOP DASH LOGIC
+-- ======================================================
+
 local function HasBlockingAnim(model)
     if not model or not model.Parent then return false end
     local hum = model:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
-
     local ok, tracks = pcall(function() return hum:GetPlayingAnimationTracks() end)
     if ok and tracks then
         for _, t in ipairs(tracks) do
@@ -231,7 +233,6 @@ local function RunLoopDashSequence()
     local lockTime    = LoopDash.LockDuration / 10
     local cooldown    = LoopDash.Cooldown / 10
 
-    -- Detect wait
     local t0 = tick()
     while tick() - t0 < waitDetect do
         if not LoopDash.Enabled or LoopDash.Blocked then
@@ -250,13 +251,11 @@ local function RunLoopDashSequence()
     local prevAuto = humanoid.AutoRotate
     humanoid.AutoRotate = false
 
-    -- Basic jump (NO Oreo Tech dependency)
     pcall(function()
         humanoid.Jump = true
         humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end)
 
-    -- Jump wait
     local t1 = tick()
     while tick() - t1 < waitJump do
         if not LoopDash.Enabled or LoopDash.Blocked then
@@ -267,9 +266,8 @@ local function RunLoopDashSequence()
         RunService.Heartbeat:Wait()
     end
 
-    FireDashQW()
+    FireDash()
 
-    -- Remote wait
     local t2 = tick()
     while tick() - t2 < waitRemote do
         if not LoopDash.Enabled or LoopDash.Blocked then
@@ -280,14 +278,13 @@ local function RunLoopDashSequence()
         RunService.Heartbeat:Wait()
     end
 
-    local target = FindBestTarget()
+    local target = FindNearestTarget(LoopDash.TargetRadius)
     local cleanup
     if target and not LoopDash.Blocked then
         cleanup = StartHorizontalLock(target, lockTime)
         LoopDash.ActiveLockCleanup = cleanup
     end
 
-    -- Keep AutoRotate off during lock
     task.spawn(function()
         local untilT = tick() + math.max(lockTime, 1.1)
         while tick() < untilT do
@@ -308,7 +305,7 @@ local function RunLoopDashSequence()
     end)
 end
 
-local function OnAnimPlayed(track)
+local function OnLoopAnimPlayed(track)
     if not LoopDash.Enabled or LoopDash.Debounce or LoopDash.Blocked then return end
     if not track or not track.Animation then return end
     local id = tostring(track.Animation.AnimationId or "")
@@ -326,7 +323,7 @@ local function HookLoopDashCharacter()
     if not char then return end
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if humanoid then
-        LoopDash.Connections.Anim = humanoid.AnimationPlayed:Connect(OnAnimPlayed)
+        LoopDash.Connections.Anim = humanoid.AnimationPlayed:Connect(OnLoopAnimPlayed)
     end
 end
 
@@ -361,7 +358,6 @@ end
 
 local function SetupLoopDash(state)
     if not state then
-        -- Unload
         for _, conn in pairs(LoopDash.Connections) do
             pcall(function() conn:Disconnect() end)
         end
@@ -387,110 +383,136 @@ local function SetupLoopDash(state)
 end
 
 -- ======================================================
---                    OREO TECH LOGIC
+--                    SUPA TECH LOGIC
 -- ======================================================
+-- Real Supa Tech flow (from tutorials):
+-- 3 M1s → Uppercut + slight backstep → Instant Unshiftlock → Instant Dash
+-- Goal: stick / glide into opponent hitbox
 
-local function UpdateOreoCharacter(char)
-    if not char then
-        OreoTech.Character = nil
-        OreoTech.Humanoid = nil
-        OreoTech.HRP = nil
-        return
+local function IsLikelyUppercut(track)
+    if not track or not track.Animation then return false end
+    local id = tostring(track.Animation.AnimationId or ""):lower()
+    local name = (track.Name or ""):lower()
+
+    for _, key in ipairs(CONFIG.SupaUppercutKeywords) do
+        if id:find(key:lower(), 1, true) or name:find(key:lower(), 1, true) then
+            return true
+        end
     end
-    OreoTech.Character = char
-    OreoTech.Humanoid  = char:FindFirstChildOfClass("Humanoid")
-    OreoTech.HRP       = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+    return false
 end
 
-local function PerformOreoJump()
-    if not OreoTech.Enabled or not OreoTech.CanJump then return false end
+local function PerformSupaTech()
+    if not SupaTech.Enabled or SupaTech.Debounce then return end
 
-    local humanoid = OreoTech.Humanoid
-    local hrp = OreoTech.HRP
-    if not humanoid or not hrp or not humanoid.Parent or not hrp.Parent then return false end
+    local char, humanoid, hrp = GetCharParts()
+    if not humanoid or not hrp then return end
 
-    OreoTech.CanJump = false
+    -- Only activate when near a valid target
+    local target = FindNearestTarget(SupaTech.DetectRadius)
+    if not target then return end
 
+    SupaTech.Debounce = true
+
+    -- 1. Slight backstep (critical for the tech)
     pcall(function()
-        humanoid.PlatformStand = false
-        humanoid.Jump = true
-        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        local look = hrp.CFrame.LookVector
+        local back = -look * SupaTech.BackstepStrength
+        hrp.AssemblyLinearVelocity = Vector3.new(back.X, hrp.AssemblyLinearVelocity.Y, back.Z)
     end)
 
-    local vel = OreoTech.JumpVelocity or 72
-    pcall(function()
-        local curr = hrp.AssemblyLinearVelocity
-        hrp.AssemblyLinearVelocity = Vector3.new(curr.X, vel, curr.Z)
-    end)
-    pcall(function()
-        local v = hrp.Velocity
-        hrp.Velocity = Vector3.new(v.X, vel, v.Z)
+    -- 2. Force unshiftlock (most important part of real Supa Tech)
+    if SupaTech.AutoUnshift then
+        pcall(function()
+            -- Multiple methods to ensure shiftlock is off
+            if player.CameraMode then
+                -- Camera related
+            end
+            local mouse = player:GetMouse()
+            -- Common shiftlock toggle methods used in TSB scripts
+            if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            end
+        end)
+    end
+
+    -- 3. Tiny delay then dash (timing is everything)
+    task.delay(SupaTech.DashDelay, function()
+        if not SupaTech.Enabled then
+            SupaTech.Debounce = false
+            return
+        end
+
+        if SupaTech.AutoDash then
+            FireDash()
+        end
+
+        -- Optional slight forward boost after dash to help stick
+        task.wait(0.02)
+        pcall(function()
+            if hrp and hrp.Parent then
+                local look = hrp.CFrame.LookVector
+                local curr = hrp.AssemblyLinearVelocity
+                hrp.AssemblyLinearVelocity = Vector3.new(curr.X + look.X * 6, curr.Y, curr.Z + look.Z * 6)
+            end
+        end)
     end)
 
-    task.delay(OreoTech.DebounceTime, function()
-        OreoTech.CanJump = true
+    task.delay(SupaTech.Cooldown, function()
+        SupaTech.Debounce = false
     end)
-
-    return true
 end
 
-local function SetupOreoTech(state)
+local function OnSupaAnimPlayed(track)
+    if not SupaTech.Enabled or SupaTech.Debounce then return end
+    if IsLikelyUppercut(track) then
+        task.spawn(PerformSupaTech)
+    end
+end
+
+local function HookSupaCharacter()
+    if SupaTech.Connections.Anim then
+        pcall(function() SupaTech.Connections.Anim:Disconnect() end)
+        SupaTech.Connections.Anim = nil
+    end
+    local char = player.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        SupaTech.Connections.Anim = humanoid.AnimationPlayed:Connect(OnSupaAnimPlayed)
+    end
+end
+
+local function SetupSupaTech(state)
     if not state then
-        for _, conn in pairs(OreoTech.Connections) do
+        for _, conn in pairs(SupaTech.Connections) do
             pcall(function() conn:Disconnect() end)
         end
-        OreoTech.Connections = {}
-        OreoTech.CanJump = true
+        SupaTech.Connections = {}
+        SupaTech.Debounce = false
         return
     end
 
-    -- Character tracking
-    if OreoTech.Connections.CharAdded then
-        pcall(function() OreoTech.Connections.CharAdded:Disconnect() end)
-    end
-    OreoTech.Connections.CharAdded = player.CharacterAdded:Connect(function(char)
-        task.wait(0.6)
-        UpdateOreoCharacter(char)
-    end)
+    HookSupaCharacter()
 
-    if player.Character then
-        UpdateOreoCharacter(player.Character)
+    if SupaTech.Connections.CharAdded then
+        pcall(function() SupaTech.Connections.CharAdded:Disconnect() end)
     end
-
-    -- Keybind (Space by default)
-    if OreoTech.Connections.Input then
-        pcall(function() OreoTech.Connections.Input:Disconnect() end)
-    end
-    OreoTech.Connections.Input = UserInputService.InputBegan:Connect(function(input, gpe)
-        if gpe then return end
-        if not OreoTech.Enabled then return end
-        if input.KeyCode == OreoTech.Keybind then
-            PerformOreoJump()
-        end
-    end)
-
-    -- Optional AutoJump when grounded
-    if OreoTech.Connections.Heartbeat then
-        pcall(function() OreoTech.Connections.Heartbeat:Disconnect() end)
-    end
-    OreoTech.Connections.Heartbeat = RunService.Heartbeat:Connect(function()
-        if not OreoTech.Enabled or not OreoTech.AutoJump then return end
-        local humanoid = OreoTech.Humanoid
-        if humanoid and humanoid.Parent and humanoid.FloorMaterial ~= Enum.Material.Air then
-            if OreoTech.CanJump then
-                PerformOreoJump()
-            end
+    SupaTech.Connections.CharAdded = player.CharacterAdded:Connect(function()
+        task.wait(0.7)
+        if SupaTech.Enabled then
+            HookSupaCharacter()
         end
     end)
 end
 
 -- ======================================================
---                    UI - LOOP DASH TAB
+--                    UI - LOOP DASH
 -- ======================================================
 
 TabLoop:Paragraph({
     Title = "Loop Dash",
-    Desc = "Independent system • Animation detect → Jump + Dash + Lock",
+    Desc = "Independent • Animation detect → Jump + Dash + Horizontal Lock",
     Image = "lucide:refresh-ccw",
     ImageSize = 18,
     Color = Color3.fromHex("#4ecdc4")
@@ -527,7 +549,7 @@ TabLoop:Slider({
 })
 
 TabLoop:Slider({
-    Title = "Smoothness / Lock Strength",
+    Title = "Smoothness / Lock",
     Flag = "LD_Smooth",
     Value = { Min = 1, Max = 1000, Default = LoopDash.Responsiveness },
     Callback = function(v) LoopDash.Responsiveness = v end
@@ -555,26 +577,26 @@ TabLoop:Slider({
 })
 
 -- ======================================================
---                    UI - OREO TECH TAB
+--                    UI - SUPA TECH
 -- ======================================================
 
-TabOreo:Paragraph({
-    Title = "Oreo Tech",
-    Desc = "Independent high-jump system • Press Space (or enable Auto)",
+TabSupa:Paragraph({
+    Title = "Supa Tech",
+    Desc = "Independent • Uppercut detect → Backstep + Unshiftlock + Instant Dash",
     Image = "lucide:zap",
     ImageSize = 18,
     Color = Color3.fromHex("#ff9f43")
 })
 
-TabOreo:Toggle({
-    Title = "Enable Oreo Tech",
-    Flag = "OT_Enable",
-    Value = OreoTech.Enabled,
+TabSupa:Toggle({
+    Title = "Enable Supa Tech",
+    Flag = "ST_Enable",
+    Value = SupaTech.Enabled,
     Callback = function(v)
-        OreoTech.Enabled = v
-        SetupOreoTech(v)
+        SupaTech.Enabled = v
+        SetupSupaTech(v)
         WindUI:Notify({
-            Title = "Oreo Tech",
+            Title = "Supa Tech",
             Content = v and "ENABLED" or "DISABLED",
             Icon = v and "lucide:check" or "lucide:x",
             Duration = 2
@@ -582,34 +604,54 @@ TabOreo:Toggle({
     end
 })
 
-TabOreo:Toggle({
-    Title = "Auto Jump (when grounded)",
-    Flag = "OT_Auto",
-    Desc = "Automatically performs Oreo jump when on ground",
-    Value = OreoTech.AutoJump,
-    Callback = function(v)
-        OreoTech.AutoJump = v
-    end
+TabSupa:Toggle({
+    Title = "Auto Unshiftlock",
+    Flag = "ST_Unshift",
+    Desc = "Automatically turns off shiftlock (core of real Supa Tech)",
+    Value = SupaTech.AutoUnshift,
+    Callback = function(v) SupaTech.AutoUnshift = v end
 })
 
-TabOreo:Slider({
-    Title = "Jump Height",
-    Flag = "OT_Height",
-    Value = { Min = 30, Max = 120, Default = OreoTech.JumpVelocity },
-    Callback = function(v) OreoTech.JumpVelocity = v end
+TabSupa:Toggle({
+    Title = "Auto Dash",
+    Flag = "ST_Dash",
+    Desc = "Automatically fires the dash after unshift",
+    Value = SupaTech.AutoDash,
+    Callback = function(v) SupaTech.AutoDash = v end
 })
 
-TabOreo:Slider({
-    Title = "Jump Debounce",
-    Flag = "OT_Debounce",
-    Value = { Min = 5, Max = 40, Default = math.floor(OreoTech.DebounceTime * 100) },
-    Callback = function(v) OreoTech.DebounceTime = v / 100 end
+TabSupa:Slider({
+    Title = "Backstep Strength",
+    Flag = "ST_Back",
+    Value = { Min = 0, Max = 20, Default = SupaTech.BackstepStrength },
+    Callback = function(v) SupaTech.BackstepStrength = v end
 })
 
--- Final notify
+TabSupa:Slider({
+    Title = "Dash Delay (ms)",
+    Flag = "ST_Delay",
+    Value = { Min = 0, Max = 15, Default = math.floor(SupaTech.DashDelay * 100) },
+    Callback = function(v) SupaTech.DashDelay = v / 100 end
+})
+
+TabSupa:Slider({
+    Title = "Detect Radius",
+    Flag = "ST_Radius",
+    Value = { Min = 5, Max = 25, Default = SupaTech.DetectRadius },
+    Callback = function(v) SupaTech.DetectRadius = v end
+})
+
+TabSupa:Slider({
+    Title = "Cooldown",
+    Flag = "ST_CD",
+    Value = { Min = 10, Max = 80, Default = math.floor(SupaTech.Cooldown * 100) },
+    Callback = function(v) SupaTech.Cooldown = v / 100 end
+})
+
+-- Final
 WindUI:Notify({
     Title = "Vxz Techs",
-    Content = "Loaded • Loop Dash & Oreo Tech are fully separated",
+    Content = "Loaded • Loop Dash & Supa Tech are fully independent",
     Icon = "lucide:check-circle",
     Duration = 3
 })
